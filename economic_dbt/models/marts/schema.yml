@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: dim_indicator
+    description: "Conformed dimension for financial and macroeconomic indicators"
+    columns:
+      - name: indicator_id
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_country
+    description: "Conformed dimension for target countries"
+    columns:
+      - name: country_iso3
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_date
+    description: "Conformed date dimension"
+    columns:
+      - name: date_id
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_us_macro_monthly
+    description: "Monthly US macroeconomic fact table from FRED"
+    columns:
+      - name: date_id
+        tests:
+          - not_null
+      - name: indicator_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_indicator')
+              field: indicator_id
+
+  - name: fct_global_macro_annual
+    description: "Annual cross-country fact table combining World Bank and aggregated FRED"
+    columns:
+      - name: indicator_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_indicator')
+              field: indicator_id
+      - name: country_iso3
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_country')
+              field: country_iso3

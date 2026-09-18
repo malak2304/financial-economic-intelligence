@@ -82,7 +82,7 @@ Standardized view for multilateral country-level development indicators from the
 
 ---
 
-## 3. Conformed Dimensions (`analytics`)
+## 3. Marts Tables (`analytics`)
 
 Shared dimensional entities that integrate the two disparate fact tables across time, geography, and indicator concepts.
 

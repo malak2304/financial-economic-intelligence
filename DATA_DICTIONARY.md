@@ -1,143 +1,172 @@
 # 📊 Data Dictionary & Data Architecture
 
-This document provides a comprehensive overview of the data architecture, data modeling methodology, schemas, and detailed descriptions of all entities and attributes used in the **Financial & Economic Intelligence Platform**.
+This document provides a comprehensive technical overview of the data architecture, dimensional modeling methodology, schema designs, and field-level definitions implemented across the **Financial & Economic Intelligence Platform**.
 
 ---
 
 ## 1. Architectural Overview & Modeling Approach
 
-The data warehouse is designed following the **Kimball Dimensional Modeling** methodology. Due to differing temporal granularities between domestic high-frequency series (monthly) and international indicators (annual), the warehouse implements a **Fact Constellation Schema (Galaxy Schema)**.
+The data warehouse follows the **Kimball Dimensional Modeling** methodology. To resolve the temporal granularity variance between domestic high-frequency monthly/quarterly indicators (FRED) and international annual macro series (World Bank), the data warehouse implements a **Fact Constellation Schema (Galaxy Schema)**.
 
-* **Schema `raw`:** Ingestion staging area where raw payloads from FRED and World Bank APIs are landed idempotently without alteration.
-* **Schema `analytics`:** The analytical data mart modeled and validated via **dbt** (Data Build Tool), housing conformed dimensions and granular fact tables optimized for analytical SQL and Power BI dashboards.
+* **Schema `raw`:** The ingestion layer where raw, unmodified payloads landed idempotently via automated Python ELT extractors.
+* **Schema `analytics`:** The modeled analytical mart curated and tested via **dbt** (Data Build Tool), housing conformed dimensions, staging views, and narrow fact tables ready for Power BI and econometric modeling.
 
 ### Entity Relationship Diagram (Galaxy Schema)
 
 ```text
-               +-----------------------+
-               |      dim_country      |
-               +-----------------------+
-               | PK: country_iso3      |
-               +-----------+-----------+
-                           |
-             +-------------+-------------+
-             |                           |
-             v                           v
-+--------------------------+   +--------------------------+
-|  fct_us_macro_monthly    |   |  fct_global_macro_annual |
-+--------------------------+   +--------------------------+
-| PK: record_id            |   | PK: record_id            |
-| FK: date_key             |   | FK: year_key             |
-| FK: country_iso3         |   | FK: country_iso3         |
-| Measures: fed_funds,     |   | Measures: gdp_growth,    |
-|   cpi, unemp, 10y, 2y,   |   |   inflation, lending_rate|
-|   yield_spread, etc.     |   +-------------+------------+
-+------------+-------------+                 |
-             |                               |
-             +-------------+-----------------+
-                           |
-                           v
-               +-----------------------+
-               |        dim_date       |
-               +-----------------------+
-               | PK: date_key          |
-               | Attributes: year,     |
-               |   month, quarter, etc |
-               +-----------------------+
+                       +-----------------------+
+                       |      dim_country      |
+                       +-----------------------+
+                       | PK: country_iso3      |
+                       |     country_name      |
+                       +-----------+-----------+
+                                   |
+                     +-------------+-------------+
+                     |                           |
+                     v                           v
+        +--------------------------+   +--------------------------+
+        |  fct_us_macro_monthly    |   |  fct_global_macro_annual |
+        +--------------------------+   +--------------------------+
+        | FK: date_id              |   | FK: observation_year     |
+        | FK: country_iso3         |   | FK: country_iso3         |
+        | FK: indicator_id         |   | FK: indicator_id         |
+        |     indicator_value      |   |     indicator_value      |
+        +------------+------+------+   +------+-----+-------------+
+                     |      |                 |     |
+                     |      +--------+ +------+     |
+                     |               | |            |
+                     v               v v            v
+        +-----------------------+   +-----------------------+
+        |        dim_date       |   |     dim_indicator     |
+        +-----------------------+   +-----------------------+
+        | PK: date_id           |   | PK: indicator_id      |
+        |     year, quarter,    |   |     indicator_name,   |
+        |     month, month_name,|   |     data_source,      |
+        |     year_month,       |   |     business_domain   |
+        |     year_quarter      |   +-----------------------+
+        +-----------------------+
 ```
 
 ---
 
-## 2. Conformed Dimensions (`analytics`)
+## 2. Staging Views (`analytics`)
 
-### `dim_date`
-Provides a uniform temporal reference for all analytical and time-series rollups.
-* **Grain:** One record per calendar month / observation date.
-* **Primary Key:** `date_key`
+The staging layer sits directly on top of the raw layer, casting data types, standardizing naming conventions, and cleaning missing records.
+
+### `stg_fred_observations`
+Standardized view for all Federal Reserve Economic Data (FRED) time-series observations.
+* **Materialization:** `view`
+* **Grain:** One record per series per observation date.
 
 | Column Name | Data Type | Description | Example |
 | :--- | :--- | :--- | :--- |
-| `date_key` | `DATE` | Primary Key representing the observation date (YYYY-MM-DD) | `2023-01-01` |
-| `full_date` | `DATE` | Full calendar date representation | `2023-01-01` |
-| `year` | `INTEGER` | Calendar year | `2023` |
-| `quarter` | `INTEGER` | Calendar quarter (1 to 4) | `1` |
-| `quarter_name` | `VARCHAR` | Quarter display label | `Q1-2023` |
-| `month` | `INTEGER` | Calendar month number (1 to 12) | `1` |
-| `month_name` | `VARCHAR` | Full name of the calendar month | `January` |
-| `year_month` | `VARCHAR` | Standardized monthly period string (YYYY-MM) | `2023-01` |
+| `series_id` | `text` | Series ticker code defined by FRED | `FEDFUNDS`, `UNRATE` |
+| `observation_date` | `date` | Observation date (YYYY-MM-DD) | `2023-01-01` |
+| `indicator_value` | `numeric(18,4)` | Recorded numerical observation value | `4.3300` |
+
+---
+
+### `stg_world_bank_observations`
+Standardized view for multilateral country-level development indicators from the World Bank API.
+* **Materialization:** `view`
+* **Grain:** One record per country per indicator per calendar year.
+
+| Column Name | Data Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| `country_iso3` | `text` | ISO 3166-1 alpha-3 standardized country code | `USA`, `EGY`, `SAU` |
+| `country_name` | `text` | Standard country name | `United States`, `Egypt` |
+| `indicator_code` | `text` | World Bank unique indicator identifier | `NY.GDP.MKTP.KD.ZG` |
+| `indicator_name` | `text` | Descriptive indicator metric name | `GDP growth (annual %)` |
+| `observation_year` | `integer` | Calendar year of the observation | `2022` |
+| `indicator_value` | `numeric(18,4)` | Recorded indicator value | `2.0640` |
+
+---
+
+## 3. Conformed Dimensions (`analytics`)
+
+Shared dimensional entities that integrate the two disparate fact tables across time, geography, and indicator concepts.
+
+### `dim_date`
+Uniform temporal reference for time-series aggregation, monthly rollups, and quarterly economic reporting.
+* **Materialization:** `table`
+* **Grain:** One record per monthly reporting date.
+* **Primary Key:** `date_id`
+
+| Column Name | Data Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| `date_id` | `date` | Primary Key representing the observation date | `2023-06-01` |
+| `year` | `integer` | Calendar year | `2023` |
+| `quarter` | `integer` | Calendar quarter (1 to 4) | `2` |
+| `month` | `integer` | Calendar month number (1 to 12) | `6` |
+| `month_name` | `text` | Full name of the calendar month | `June` |
+| `year_month` | `text` | Year-month period format (`YYYY-MM`) | `2023-06` |
+| `year_quarter` | `text` | Year-quarter formatted label (`YYYY-Q#`) | `2023-Q2` |
 
 ---
 
 ### `dim_country`
-Conformed geographical dimension standardizing country attributes and regional classifications across US-specific and cross-country comparisons.
-* **Grain:** One record per sovereign country.
+Conformed country dimension standardizing sovereign jurisdiction codes and names.
+* **Materialization:** `table`
+* **Grain:** One record per country.
 * **Primary Key:** `country_iso3`
 
 | Column Name | Data Type | Description | Example |
 | :--- | :--- | :--- | :--- |
-| `country_iso3` | `VARCHAR(3)` | ISO 3166-1 alpha-3 standardized country code (Primary Key) | `USA`, `EGY`, `ARE` |
-| `country_name` | `VARCHAR` | Official common name of the sovereign entity | `United States`, `Egypt` |
-| `region` | `VARCHAR` | Geographic and economic regional classification | `North America`, `MENA` |
-| `income_group` | `VARCHAR` | World Bank income bracket classification | `High income`, `Lower middle income` |
+| `country_iso3` | `text` | ISO 3166-1 alpha-3 country code (Primary Key) | `USA`, `EGY`, `GBR` |
+| `country_name` | `text` | Full sovereign name of the country | `United States`, `Egypt` |
 
 ---
 
 ### `dim_indicator`
-Metadata repository defining economic series definitions, reporting frequency, and measurement units.
-* **Grain:** One record per macro metric.
+Conformed metric repository standardizing business domain taxonomy, reporting data source, and metric identifiers across FRED and World Bank.
+* **Materialization:** `table`
+* **Grain:** One record per unique economic indicator series.
 * **Primary Key:** `indicator_id`
 
 | Column Name | Data Type | Description | Example |
 | :--- | :--- | :--- | :--- |
-| `indicator_id` | `VARCHAR` | Unique metric identifier / series code | `FEDFUNDS`, `FP.CPI.TOTL.ZG` |
-| `indicator_name`| `VARCHAR` | Standardized descriptive name of the indicator | `Federal Funds Effective Rate` |
-| `category` | `VARCHAR` | Economic domain (Monetary Policy, Labor, Inflation, Output) | `Monetary Policy` |
-| `unit` | `VARCHAR` | Unit of measure | `Percent`, `Index (2015=100)` |
-| `data_source` | `VARCHAR` | Source reporting institution / API platform | `FRED`, `World Bank` |
+| `indicator_id` | `text` | Unique indicator code or series ID (Primary Key) | `FEDFUNDS`, `NY.GDP.MKTP.KD.ZG` |
+| `indicator_name` | `text` | Human-readable economic indicator label | `Federal Funds Effective Rate` |
+| `data_source` | `text` | Originating data provider / platform | `FRED`, `World Bank` |
+| `business_domain` | `text` | Financial/Economic domain classification | `Monetary Policy`, `Economic Growth` |
 
 ---
 
-## 3. Fact Tables (`analytics`)
+## 4. Fact Tables (`analytics`)
+
+Narrow, normalized fact tables storing time-series measurements with explicit foreign key relationships.
 
 ### `fct_us_macro_monthly`
-High-frequency US macroeconomic data combining monetary policy rates, inflation metrics, labor statistics, and sovereign debt yields.
-* **Grain:** One record per month for the United States.
-* **Primary Key:** `record_id` (Surrogate MD5 hash key)
+High-frequency monthly time series tracking US monetary policy rates, inflation gauges, labor statistics, bond yields, and liquidity measures.
+* **Materialization:** `table`
+* **Grain:** One record per indicator per month for the United States.
+* **Foreign Keys:** `date_id` ➔ `dim_date`, `country_iso3` ➔ `dim_country`, `indicator_id` ➔ `dim_indicator`
 
 | Column Name | Data Type | Description | Example |
 | :--- | :--- | :--- | :--- |
-| `record_id` | `VARCHAR(32)` | Unique surrogate MD5 hash key (`date_key` + `country_iso3`) | `e4d909c290d0fb1ca068ffaddf22cbd0` |
-| `date_key` | `DATE` | Foreign key referencing `dim_date` | `2023-06-01` |
-| `country_iso3` | `VARCHAR(3)` | Foreign key referencing `dim_country` (default: `USA`) | `USA` |
-| `fed_funds_rate` | `NUMERIC(6,3)`| Federal Funds Effective Rate (%) | `5.080` |
-| `cpi_index` | `NUMERIC(8,3)`| Consumer Price Index for All Urban Consumers | `304.382` |
-| `unemployment_rate` | `NUMERIC(4,2)`| Civilian Unemployment Rate (%) | `3.60` |
-| `treasury_10y_yield` | `NUMERIC(6,3)`| 10-Year Treasury Constant Maturity Rate (%) | `3.750` |
-| `treasury_2y_yield` | `NUMERIC(6,3)`| 2-Year Treasury Constant Maturity Rate (%) | `4.640` |
-| `yield_spread_10y_2y`| `NUMERIC(6,3)`| Yield curve slope (`10y - 2y`). Inversion (< 0) signals recession risk | `-0.890` |
+| `date_id` | `date` | Foreign Key referencing `dim_date.date_id` | `2023-08-01` |
+| `country_iso3` | `text` | Foreign Key referencing `dim_country.country_iso3` (`USA`) | `USA` |
+| `indicator_id` | `text` | Foreign Key referencing `dim_indicator.indicator_id` | `FEDFUNDS` |
+| `indicator_value` | `numeric(18,4)` | Recorded numerical observation value | `5.3300` |
 
 ---
 
 ### `fct_global_macro_annual`
-Annual macroeconomic panel data tracking cross-border growth, trade balances, and financial health indicators across comparative economies.
-* **Grain:** One record per country per calendar year.
-* **Primary Key:** `record_id` (Surrogate MD5 hash key)
+Annual panel data combining cross-country macroeconomic metrics from World Bank along with annualized US metrics from FRED.
+* **Materialization:** `table`
+* **Grain:** One record per indicator per country per calendar year.
+* **Foreign Keys:** `observation_year` ➔ `dim_date.year`, `country_iso3` ➔ `dim_country`, `indicator_id` ➔ `dim_indicator`
 
 | Column Name | Data Type | Description | Example |
 | :--- | :--- | :--- | :--- |
-| `record_id` | `VARCHAR(32)` | Unique surrogate MD5 hash key (`year` + `country_iso3`) | `b94d27b9934d3e08a52e52d7da7dabfa` |
-| `year_key` | `INTEGER` | Reference year matching `dim_date.year` | `2023` |
-| `country_iso3` | `VARCHAR(3)` | Foreign key referencing `dim_country` | `EGY` |
-| `gdp_growth_pct` | `NUMERIC(6,3)`| Annual percentage growth rate of GDP at market prices | `3.760` |
-| `inflation_cpi_pct` | `NUMERIC(6,3)`| Annual inflation rate, consumer prices (%) | `33.880` |
-| `domestic_credit_pct_gdp` | `NUMERIC(6,3)`| Domestic credit provided to private sector (% of GDP) | `27.450` |
-| `bank_npl_pct` | `NUMERIC(6,3)`| Bank non-performing loans to gross loans (%) | `3.400` |
-| `remittances_pct_gdp` | `NUMERIC(6,3)`| Personal remittances received (% of GDP) | `6.120` |
+| `observation_year` | `integer` | Reference calendar year | `2023` |
+| `country_iso3` | `text` | Foreign Key referencing `dim_country.country_iso3` | `EGY` |
+| `indicator_id` | `text` | Foreign Key referencing `dim_indicator.indicator_id` | `FP.CPI.TOTL.ZG` |
+| `indicator_value` | `numeric(18,4)` | Annual indicator value or aggregated annual average | `33.8800` |
 
 ---
 
-## 4. Staging & Raw Source Data (`raw`)
+## 5. Ingestion Raw Layer (`raw`)
 
-Raw data ingested directly via automated Python ELT workers:
-* **`raw.fred_observations`:** Stored observation payloads from Federal Reserve Economic Data API.
-* **`raw.world_bank_indicators`:** Multilateral indicator series retrieved via the World Bank Data API.
+* **`raw.fred_observations`:** Stored observation payloads from the Federal Reserve Economic Data API.
+* **`raw.world_bank_indicators`:** Ingested country development indicators from the World Bank API.

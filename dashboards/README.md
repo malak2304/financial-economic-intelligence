@@ -1,18 +1,4 @@
-# 📊 Macroeconomic Intelligence & FinTech Strategy Cockpit
-> **Interactive Executive Decision Support System Built with Power BI, PostgreSQL, dbt, and Econometric Modeling**
-
----
-
-## 🌟 Executive Overview
-The **Macroeconomic Intelligence & FinTech Strategy Cockpit** bridges the gap between macroeconomic policy shifts and FinTech decision-making. By analyzing over 24 years of empirical data (2000–2024) across the **United States, United Kingdom, Saudi Arabia, the United Arab Emirates, and Egypt**, this platform translates complex econometric dynamics into actionable risk, underwriting, and geographic expansion playbooks for C-suite and FinTech executives.
-
-The cockpit focuses on answering core business questions:
-1. **Monetary Transmission Dynamics:** How long does it take for central bank rate hikes to cool inflation and reshape consumer default probabilities?
-2. **Yield Curve Inversion:** When does yield curve flattening transition into duration and refinancing traps?
-3. **Liquidity Shocks:** What is the statistical lag between central bank balance sheet expansion ($M_2$) and inflationary spikes?
-4. **Cross-Border Market Arbitrage:** Where should FinTech platforms allocate capital—saturated credit markets (e.g., US/UK) or high-growth, remittance-backed underbanked economies (e.g., Egypt/GCC)?
-
----
+# 📊 Macroeconomic Intelligence & FinTech Strategy Cockpit 
 
 ## 🏗️ Architecture & Data Lineage
 This Power BI reporting tier directly consumes analytics-ready marts modeled in **PostgreSQL** via **dbt (data build tool)**:
@@ -74,12 +60,3 @@ This Power BI reporting tier directly consumes analytics-ready marts modeled in 
 ## 🧮 Data Modeling & DAX Core Metrics
 
 The data model is built on an enterprise **Galaxy Schema** consisting of two fact tables (`fct_us_macro_monthly` and `fct_global_macro_annual`) unified by shared dimensions (`dim_date`, `dim_country`, `dim_indicator`).
-
-### Key DAX Measures:
-* **Dynamic Latest Period Filtering:**
-  ```dax
-  Latest Fed Funds Rate = 
-  CALCULATE(
-      [Fed Funds Rate],
-      LASTNONBLANK(analytics_dim_date[date_id], [Fed Funds Rate])
-  )
